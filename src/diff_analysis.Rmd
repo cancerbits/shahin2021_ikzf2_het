@@ -1,0 +1,164 @@
+```{r P:pt_diff_analysis,cache=TRUE}
+srt_all$sample_clust <- paste(srt_all$orig.ident,srt_all$cluster_id,sep = "_")
+srt_all$state <- ifelse(str_sub(srt_all$orig.ident, 1,1)=="P",as.character(srt_all$orig.ident),"C")
+Idents(srt_all) <- srt_all@meta.data$sample_clust
+
+cmp_cluster_pt <- srt_all@meta.data %>%
+  mutate_all(as.character) %>%
+  dplyr::count(cluster_id,sample_clust) %>%
+  group_by(cluster_id) %>% 
+  filter(n >= min_cell_n) %>%
+  ungroup() %>% 
+  mutate(n=NULL,
+         other = list(unique(sample_clust))) %>%
+  unnest(other)%>%
+  filter(str_replace(sample_clust, "^[0-9A-Z-]+_", "") == str_replace(other, "^[0-9A-Z-]+_", ""),
+         str_extract(other,"^.+_") != str_extract(sample_clust,"^.+_"),
+         str_detect(sample_clust, "C", negate = TRUE),
+         str_detect(other, "C"))
+
+diff_cluster_pt_out <- map2(cmp_cluster_pt[[2]],cmp_cluster_pt[[3]],function(clust_sample, meta_samples){
+    message(clust_sample, " vs ", paste(meta_samples,collapse = ", "))
+
+  FindMarkers(srt_all,
+              ident.1 = clust_sample,
+              ident.2 = meta_samples,
+              only.pos = FALSE,
+              min.pct=0.7,
+              test.use = diff_test,
+              verbose = FALSE,
+              features= srt_all@assays$SCT@data %>% rownames %>% str_subset("^RP[SL]|^MT-",negate = TRUE)) %>%
+    rownames_to_column("gene") %>%
+    add_column(clust_sample = clust_sample,
+               clust = str_replace(clust_sample, "^[0-9A-Z-]+_", ""),
+               #clust = str_sub(unique(clust_sample), -1),#for sample_meta_clust comparisons
+               meta_samples = paste(meta_samples, collapse = ", ")
+               )
+    })
+
+```
+
+```{r P:pt_diff_aggregate}
+markers_pt_comb <- diff_cluster_pt_out %>%
+  bind_rows() %>%
+  group_by(clust_sample) %>%
+  #number of comparisons carried per patient in each cluster
+  mutate(n_comp = n_distinct(meta_samples)) %>%
+  group_by(clust_sample, gene) %>%
+  #summarize gene statistics across carried comparisons per patient
+  summarise(comb_pval = f_pval(p_val),#combine p-values
+            n_gene = n(),#number of comprisons in which a gene came out
+            min_lfc = avg_log2FC[which.min(abs(avg_log2FC))],#minimum log-fold change across all comparisons
+            logfc_dir = sum(avg_log2FC>0),#number of comparisons in which the gene have the same direction of regulation
+            n_comp = unique(n_comp),
+            clust = unique(clust)) %>%
+  ungroup() %>%
+  mutate(adj_pval = p.adjust(comb_pval,"BH")) #adjust combined p-values for multiple testing
+```
+
+```{r P:pt_diff_filter}
+markers_pt_sig <- markers_pt_comb %>%
+  filter(adj_pval < fdr_threshold,
+         abs(min_lfc) >= lfc_threshold,
+         n_comp >= 3,#remove genes where patient was compared to less than 3 normal donors 
+         (n_gene/n_comp) == 1,#gene detected in 100% of comparisons
+         (logfc_dir==0|logfc_dir==n_gene)#gene maintain the same direction of regulation in all comparisons
+         ) %>%
+  arrange(clust_sample,desc(min_lfc))
+
+```
+
+```{r}
+markers_pt_sig %>% 
+  dplyr::select(clust, gene, min_lfc, adj_pval) %>% 
+  arrange(clust, adj_pval, min_lfc) %>% 
+  write_csv("DEGs_only_P_IKZF2-het.csv")
+```
+
+```{r manuscript_fig_supp3_b, eval=FALSE}
+meta_clusters <- list(t_cells_res_0.1 = c("1","2"),
+                      monocytes_res_0.1 = c("0"),
+                      DC_res_0.1 = c("5"),
+                      B_res_0.1 = c("3"),
+                      t_cells_clust_id = c("2_a","2_b"),
+                      monocytes_clust_id = c("1_a", "1_b"),
+                      DC_clust_id = c("4"),
+                      B_clust_id = c("3")
+                      )
+pdf("manuscript_fig_supp3_b.pdf",height = 9)
+for(res_0.1 in markers_pt_sig$clust%>%unique()){
+  clust_id <- res_0.1
+  cell_type <- names(meta_clusters[5:8])[sapply(meta_clusters[5:8], function(x) clust_id %in% x)] %>% str_replace("_clust_id", "")
+
+  #define set to genes
+  df <- markers_pt_sig %>%
+    filter(clust %in% res_0.1) %>% 
+    arrange(clust,clust_sample,desc(logfc_dir),desc(min_lfc)) 
+  ph_genes <- df %>% 
+    distinct(gene)
+  patients <- unique(str_extract(df$clust_sample, "[0-9A-Z-]+"))
+  
+  #order cells based on labels of interest
+  ph_cells <- srt_all@meta.data %>%
+    mutate(state = ifelse(str_sub(orig.ident, 1,1)=="P",as.character(orig.ident),"C"),
+           orig.ident = factor(orig.ident,
+                              levels = c("C1", "C2", "C3", "C4",patients))) %>%
+    filter(cluster_id %in% res_0.1,
+           orig.ident %in% c("C1", "C2", "C3", "C4",patients)) %>% 
+    arrange(SCT_snn_res.0.1,orig.ident)  %$% 
+    cell_id
+
+  #define labels of the genes
+  ph_row_annot <- data.frame(cell_type = rep(cell_type,length(ph_genes$gene)) )
+  rownames(ph_row_annot) <- ph_genes$gene
+  
+  #define labels of the cells
+  ph_col_annot <- srt_all@meta.data %>%
+    mutate(state = ifelse(str_sub(orig.ident, 1,1)=="P",as.character(orig.ident),"C"),
+          orig.ident = factor(orig.ident,
+                              levels = c("C1", "C2", "C3", "C4",
+                                          patients))) %>% 
+    dplyr::select(cell_id, orig.ident,state) %>%
+    filter(cell_id %in% ph_cells) %>% 
+    mutate_if(is.factor, forcats::fct_drop) %>%
+    mutate(cell_id = NULL) %>% 
+    arrange(orig.ident) 
+
+  #extract and clip (the same is done by Seurat DoHeatmap() under the hood) scaled value
+  ph_df_scale <- srt_all@assays$SCT@scale.data[ph_genes$gene, ph_cells] %>% rbind
+  rownames(ph_df_scale) <- ph_genes$gene
+  ph_df_scale[ph_df_scale > 2.5] <- 2.5 #clip values >2.5
+  ph_df_scale[ph_df_scale < -2.5] <- -2.5 #clip values <-2.5
+
+  #annotation colors
+  ph_annot_column <- list(orig.ident =  cols[c(patients,str_subset(names(cols),"^C"))])
+  cell_type_color <- cols[clust_id]
+  names(cell_type_color) <- cell_type
+  ph_annot_row <- list(cell_type = cell_type_color)
+  ph_annot <- c(ph_annot_column, ph_annot_row)
+  #plot
+  #jpeg(glue("{clust_id}.jpeg"),units = "in",8,10,res =1080)
+  ph <- pheatmap::pheatmap(ph_df_scale,
+                          color = colorRampPalette(rev(brewer.pal(7, "PiYG")))(100),
+                          scale = "none",
+                          gaps_col = ph_col_annot%>% arrange(state)%$% table(state) %>% cumsum,
+                          #gaps_row = ph_genes$clust %>% table() %>% cumsum,
+                          cluster_cols = FALSE,
+                          cluster_rows = nrow(ph_df_scale)>1,
+                          show_colnames = FALSE,
+                          show_rownames = TRUE,
+                          annotation_names_row = FALSE,
+                          annotation_col = ph_col_annot %>% dplyr::select(-state),
+                          annotation_row = ph_row_annot,
+                          treeheight_row = 0,
+                          #annotation_legend = FALSE,
+                          annotation_colors = ph_annot,
+                          fontsize_row = 9,
+                          fontsize = 9,
+                          cellheight = 9,
+                          main = res_0.1)
+  print(ph)
+  }
+dev.off()
+
+```

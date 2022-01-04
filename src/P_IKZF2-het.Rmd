@@ -1,0 +1,239 @@
+```{r P:subset samples}
+subset_samples <- clindata %>% 
+  filter(`Sample Name` == "P_IKZF2-het" | str_detect(`Sample Name`,"^C")) %>% 
+  pull(`Sample Name`)
+srt_all <- subset(seurat_obj, subset = orig.ident %in% subset_samples)
+rm(seurat_obj)
+srt_all$orig.ident <- as.character(srt_all$orig.ident)
+```
+
+#### dimensionality reduction
+
+```{r P:transformation,cache=TRUE}
+srt_all <- SCTransform(srt_all,
+                      vars.to.regress = "percent_mt",
+                      return.only.var.genes = F,
+                      verbose = FALSE)
+
+```
+
+```{r P:run pca,cache=TRUE}
+srt_all <- RunPCA(srt_all,
+                  verbose = FALSE,
+                  assay='SCT',
+                  dims = seuratAnalysisCfg$PCA_DIMS)
+
+```
+
+```{r P:integration, cache=TRUE}
+srt_all <- RunHarmony(srt_all,
+                     group.by.vars = "orig.ident",
+                     assay.use="SCT",
+                     dims = seuratAnalysisCfg$PCA_DIMS)
+
+```
+
+
+```{r P:define clusters, cache=TRUE}
+srt_all <- FindNeighbors(srt_all,
+                         assay="SCT",
+                         reduction = "harmony",
+                         k.param=10,
+                         dims = seuratAnalysisCfg$PCA_DIMS)
+
+for(res in c(0.1, 0.2, 0.4, 0.6, 0.8, 1.0)){
+  srt_all <- FindClusters(srt_all,
+                          graph.name = "SCT_snn",
+                          resolution = res,
+                          verbose = FALSE)
+  }
+
+```
+
+```{r P:run umap, cache=TRUE}
+srt_all <- RunUMAP(srt_all,
+                   reduction = "harmony",
+                   dims = seuratAnalysisCfg$PCA_DIMS)
+
+```
+
+```{r P:recode_cluster, eval=TRUE }
+#change clusters labels
+srt_all@meta.data$cluster_id <- recode(srt_all@meta.data$SCT_snn_res.0.1,
+                                            `0`="1_a",
+                                            `4` = "1_b",
+                                            `1` = "2_a",
+                                            `2` = "2_b",
+                                            `3` = "3",
+                                            `5` = "4",
+                                            `6` = "5",
+                                            `7`= "6",
+                                            `8`= "7"
+                                            ) 
+srt_all@meta.data$cluster_id <- factor(srt_all@meta.data$cluster_id,
+                                       levels = sort(levels(srt_all@meta.data$cluster_id))) %>% 
+  as.character()
+
+#labels colors
+pt_cols <- c("P_IKZF2-het"="#7570b3",
+            "C2"="#F0F0F0",
+            "C1"="#D9D9D9",
+            "C4"="#BDBDBD",
+            "C3"="#969696"
+            )
+cols <- c(`1_a`="#238b45", `1_b`="#74c476", `1_c`="#c7e9c0",
+          `2_a`="#08519c", `2_b`="#4292c6", `2_c`= "#c6dbef",
+          `3`="#fed976",
+          `4`="#fd8d3c",
+          `4_a`= "#fd8d3c",`4_b`="#e31a1c",
+          `5`="#FF00FF",
+          `6`="#b15928",
+          `7`="#e31a1c",
+           C="#969696",
+          pt_cols)
+cluster_id_mapping <- distinct_all(srt_all@meta.data[,c("SCT_snn_res.0.1", "cluster_id")])%$%
+  setNames(cluster_id,SCT_snn_res.0.1)
+```
+
+```{r P:no_homo:UMAP cluster_id, eval = FALSE}
+plot_1 <- DimPlot(reduction="umap", srt_all, group.by = "cluster_id", label = TRUE,label.size = 3) +
+    coord_fixed()+
+    scale_colour_manual(values = cols)+
+    theme(axis.title = element_text(size = 7),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          plot.title = element_blank(),
+          plot.margin = ggplot2::unit(c(0,0,0,0),units = "cm"))+
+  guides(color = FALSE)
+
+```
+
+```{r manuscript_fig_supP}
+df <- cbind(srt_all@meta.data,
+            srt_all@reductions$umap@cell.embeddings)
+
+df %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = cluster_id))+
+  geom_point(size = 0.05)+
+  scale_colour_manual(values = cols)+
+  coord_fixed()+
+  gghighlight(unhighlighted_params = aes(color = "grey90"))+
+  facet_wrap(~ cluster_id, nrow = 3)+
+  theme(axis.ticks.x = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "none")+
+  ggsave(filename = "manuscript_fig_supP.pdf")
+```
+
+```{r P:highlight patients and C, fig.width=10, fig.height=5, eval=FALSE}
+map_df <- cbind(srt_all@meta.data,
+                srt_all@reductions$umap@cell.embeddings,
+                highlight_var = ifelse(srt_all$Genotype!="WT",srt_all$orig.ident,"C"))
+
+plot_2 <- map_df %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = highlight_var))+
+  geom_point(size = 0.05)+
+  scale_colour_manual(values = cols)+
+  coord_fixed()+
+  gghighlight(highlight_var!= "C", unhighlighted_params = aes(color = "grey90"))+
+  facet_wrap(~ highlight_var, nrow = 3,strip.position = "right")+
+  theme(axis.title = element_text(size = 7),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "none",
+        plot.margin = ggplot2::unit(c(0,0,0,0),units = "cm"))
+
+
+```
+
+```{r P:barplot sample contribution,fig.width=10,fig.height=7, eval=FALSE}
+sample_contrib <- srt_all@meta.data %>%
+    group_by(cluster_id, orig.ident) %>%
+    summarise(n_sample=n())  %>%
+    mutate(freq_sample = n_sample / sum(n_sample))
+
+sample_contrib_plot(sample_contrib, "orig.ident", "freq_sample", "cluster_id", 2)+
+  scale_fill_manual(values = pt_cols)
+
+ggplot(data=sample_contrib,
+       aes(x=orig.ident, y=n_sample, fill = orig.ident))+
+  geom_bar(stat="identity")+
+  scale_fill_manual(values = pt_cols)+
+  facet_wrap( ~ cluster_id,nrow=2)+
+  geom_hline(yintercept = min_cell_n, lty = 2)+
+  scale_y_log10()+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90),
+        panel.border = element_rect(color= "grey", fill = NA, size = 1))
+
+```
+
+```{r P:individual cluster percentage, fig.width=10, fig.height=5, eval=FALSE}
+srt_all@meta.data %>%
+    group_by(orig.ident, cluster_id) %>%
+    summarise(n_cell=n())  %>%
+    ungroup() %>% 
+    group_by(orig.ident) %>% 
+    mutate(freq_cell = n_cell / sum(n_cell),
+           individual_n = glue("{orig.ident}\n(n={sum(n_cell)})")
+           ) %>%
+    ungroup() %>%
+    ggplot(aes(x=orig.ident,
+               y=freq_cell,
+               fill = orig.ident,
+               label = glue("{100*round(freq_cell,4)}%")))+
+    geom_bar(stat="identity",position = "dodge",show.legend = FALSE)+
+    scale_y_continuous(limits = c(0,0.9),
+                       labels = scales::label_percent())+
+    facet_wrap( ~ cluster_id,ncol = 11)+
+    labs(x=NULL, y = "Cell per sample")+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 90))+
+    scale_fill_manual(values = pt_cols)+
+    guides(fill = NULL)
+dev.off()
+
+plot_3 <- srt_all@meta.data %>%
+    group_by(orig.ident, cluster_id) %>%
+    summarise(n_cell=n())  %>%
+    ungroup() %>% 
+    group_by(orig.ident) %>% 
+    mutate(freq_cell = n_cell / sum(n_cell),
+           individual_n = glue("{orig.ident}\n(n={sum(n_cell)})")
+           ) %>%
+    ungroup() %>%
+    #filter(str_detect(orig.ident, "^P")) %>% 
+    ggplot(aes(x=orig.ident,
+               y=freq_cell,
+               fill = orig.ident,
+               label = glue("{100*round(freq_cell,4)}%")))+
+    geom_bar(stat="identity",position = "dodge",show.legend = FALSE)+
+    scale_y_continuous(limits = c(0,0.9),
+                       labels = scales::label_percent())+
+    facet_wrap( ~ cluster_id,nrow =  1,strip.position = "bottom")+
+    labs(x=NULL, y = "Cluster percentage\n per sample")+
+    theme(legend.position = "bottom",
+          strip.background = element_blank(),
+          strip.text = element_text(size = 7),
+          axis.line.x = element_blank(),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(size = 7),
+          axis.ticks.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.text.y = element_text(size = 7),
+          axis.ticks = element_blank(),
+          plot.margin = ggplot2::unit(c(0,0,0,0),units = "cm"))+
+  scale_fill_manual(values = pt_cols)
+```
+
+```{r manuscript_fig1, eval=FALSE}
+(plot_1|plot_2)/plot_3+
+    plot_layout(widths = ggplot2::unit(c(10, 10), c('cm', 'cm')),
+                heights = ggplot2::unit(c(6,4), c('cm', 'cm')))+
+  ggsave(filename = "manuscript_fig1_f_g.pdf")
+  
+```

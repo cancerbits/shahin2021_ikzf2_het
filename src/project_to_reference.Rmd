@@ -1,0 +1,79 @@
+```{r pbmc_multimodal_ref, cache = TRUE}
+reference <- SeuratDisk::LoadH5Seurat(file.path(projection_ref_dir,"pbmc_multimodal/pbmc_multimodal.h5seurat"))
+
+# DimPlot(object = reference, reduction = "wnn.umap", group.by = "celltype.l2", label = TRUE, label.size = 3, repel = TRUE) + NoLegend()
+# 
+```
+
+```{r map data to reference, cache = TRUE}
+anchors <- FindTransferAnchors(
+  reference = reference,
+  query = srt_all,
+  normalization.method = "SCT",
+  reference.reduction = "spca",
+  dims = seuratAnalysisCfg$PCA_DIMS,
+  recompute.residuals = FALSE
+)
+
+srt_all <- MapQuery(
+  anchorset = anchors,
+  query = srt_all,
+  reference = reference,
+  refdata = list(
+    celltype.l1 = "celltype.l1",
+    celltype.l2 = "celltype.l2",
+    predicted_ADT = "ADT"
+  ),
+  reference.reduction = "spca", 
+  reduction.model = "wnn.umap"
+)
+```
+
+```{r manuscript_fig_supp3_a_c}
+p1 = DimPlot(srt_all, reduction = "umap", group.by = "predicted.celltype.l1", label = TRUE, label.size = 3, repel = TRUE) +
+  NoLegend()+
+  coord_fixed()+
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+p2 = DimPlot(srt_all, reduction = "umap", group.by = "predicted.celltype.l2", label = TRUE, label.size = 2.5 ,repel = TRUE)+
+  NoLegend()+
+  coord_fixed()+
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+p1 + p2+
+  ggsave("manuscript_fig_supp3_a.pdf",width=8,height=6)
+
+
+df <- bind_cols(srt_all@meta.data,
+                IKZF2=srt_all@assays$SCT@data["IKZF2", ]) %>%
+  arrange(desc(IKZF2)) %>%
+  mutate(cell_rank = 1:n(),
+         cell_class = case_when(
+           str_sub(predicted.celltype.l1, -1) %in% c("T","K") ~ "T-cells & NK",
+           predicted.celltype.l1 %in% c("Mono", "other") ~ "Monocytes",
+           TRUE ~ as.character(predicted.celltype.l1)
+         ),
+         IKZF2 = forcats::fct_rev(factor(round(IKZF2,2)))) %>% 
+  group_by(predicted.celltype.l2) %>% 
+  filter(n() > 100) %>% 
+  group_by(predicted.celltype.l2,IKZF2) %>% 
+  summarise(n = n()) %>% 
+  ungroup(IKZF2) %>% 
+  summarise(IKZF2,
+            percent = n/sum(n)) %>%
+  ungroup() %>%
+  arrange(desc(percent)) %>% 
+  mutate(predicted.celltype.l2 = forcats::fct_relevel(predicted.celltype.l2,unique(predicted.celltype.l2)))
+
+df %>% 
+  filter(IKZF2!=0) %>% 
+  group_by(predicted.celltype.l2) %>% 
+  summarize(percent = sum(percent)) %>% 
+  ggplot(aes(x = predicted.celltype.l2,y=percent))+
+  geom_col(fill = "grey20")+
+  coord_flip()+
+  scale_y_continuous(labels = scales::percent_format())+
+  labs(y="Percentage of cells expressing IKZF2", x = "")
+  ggsave("manuscript_fig_supp3_c.pdf",width=8,height=6)
+```
+
