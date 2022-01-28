@@ -1,4 +1,4 @@
-# Supplementary code repository for: Identification of germline monoallelic mutations in ikzf2 in patients with immune dysregulation
+# Supplementary code repository for: Identification of germline monoallelic mutations in IKZF2 in patients with immune dysregulation
 
 Authors: Tala Shahin,<sup>1-3,* </sup> Daniel Mayr,<sup>1-3,* </sup> Mohamed R. Shoeb,<sup>2</sup> Hye Sun Kuehn,<sup>4</sup> Birgit Hoeger,<sup>1-3</sup> Sarah Giuliani,<sup>1,2</sup> Lisa M. Gawriyski,<sup>5</sup> Özlem Yüce Petronczki,<sup>1-3</sup> Jerome Hadjadj,<sup>6</sup> Sevgi Köstel Bal,<sup>1-3</sup> Samaneh Zoghi,<sup>1-3,7,8</sup> Matthias Haimel,</sup>1-3</sup> Raul Jimenez Heredia,</sup>1-3</sup> David Boutboul,</sup>9</sup> Michael P. Triebwasser,</sup>10,11</sup> Fanny Rialland-Battisti,</sup>12</sup> Nathalie Costedoat Chalumeau,</sup>13</sup> Pierre Quartier,</sup>6,14</sup> Stuart G. Tangye,</sup>15,16</sup> Thomas A. Fleisher,4 Nima Rezaei,</sup>7,8</sup> Neil Romberg,</sup>10,11</sup> Sylvain Latour,</sup>9,†</sup> Markku Varjosalo,</sup>5,†</sup> Florian Halbritter,</sup>2,†</sup> Fred eric Rieux-Laucat,</sup>6,†</sup> Irinka Castanon,</sup>1,2,†</sup> Sergio D. Rosenzweig,</sup>4,* </sup> and Kaan Boztug</sup>1-3,17,*</sup>
 
@@ -62,4 +62,4 @@ Input data can be obtained from EGA (link below).
 ## Links:
 
 * European Genome-Phenome Archive (EGA): <a href="https://ega-archive.org/studies/EGAS00001005675">control samples</a> and <a href="https://ega-archive.org/studies/EGAS00001005874">patient</a>.
-* Paper: Will be added shortly. <!--a href="TBC">TBC</a-->
+* Paper: <a href="https://doi.org/10.1182/bloodadvances.2021006367">https://doi.org/10.1182/bloodadvances.2021006367</a>
